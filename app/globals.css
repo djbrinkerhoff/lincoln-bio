@@ -1,3 +1,7 @@
+/* Fonts - must be before tailwindcss */
+@import url('https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap');
+
 @import "tailwindcss";
 
 /* IMPORTANT: Keep defaults in sync with DEFAULT_STATE in theme-store.ts */
@@ -9,22 +13,156 @@
   --color-accent-hover: #2563eb;
   --color-accent-text: #ffffff;
   --button-radius: 0.5rem;
+
+  /* Editor theme */
+  --editor-bg: #0a0a0b;
+  --editor-surface: #141416;
+  --editor-border: #27272a;
+  --editor-text: #fafafa;
+  --editor-text-muted: #71717a;
+  --editor-accent: #a855f7;
 }
 
 body {
-  font-family: system-ui, -apple-system, sans-serif;
+  font-family: 'Satoshi', system-ui, sans-serif;
+  background: #0a0a0b;
+  -webkit-font-smoothing: antialiased;
 }
 
+/* Custom scrollbar for editor */
+.editor-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.editor-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.editor-scroll::-webkit-scrollbar-thumb {
+  background: var(--editor-border);
+  border-radius: 3px;
+}
+
+.editor-scroll::-webkit-scrollbar-thumb:hover {
+  background: #3f3f46;
+}
+
+/* react-colorful customization */
 .react-colorful {
   width: 100%;
-  height: 160px;
+  height: 140px;
+  border-radius: 12px;
+  overflow: hidden;
 }
 
 .react-colorful__saturation {
-  border-radius: 4px 4px 0 0;
+  border-radius: 12px 12px 0 0;
 }
 
 .react-colorful__hue {
-  height: 24px;
-  border-radius: 0 0 4px 4px;
+  height: 16px;
+  border-radius: 0 0 12px 12px;
+}
+
+.react-colorful__pointer {
+  width: 20px;
+  height: 20px;
+  border: 3px solid white;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.react-colorful__hue .react-colorful__pointer {
+  width: 16px;
+  height: 16px;
+}
+
+/* Phone mockup frame */
+.phone-frame {
+  background: linear-gradient(145deg, #1a1a1a 0%, #0d0d0d 100%);
+  border-radius: 40px;
+  padding: 12px;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.1),
+    0 25px 50px -12px rgba(0, 0, 0, 0.8),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.phone-screen {
+  border-radius: 32px;
+  overflow: hidden;
+  position: relative;
+}
+
+.phone-notch {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100px;
+  height: 28px;
+  background: #0a0a0a;
+  border-radius: 20px;
+  z-index: 10;
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.4s ease-out forwards;
+}
+
+.animate-fade-in-delay-1 { animation-delay: 0.1s; opacity: 0; }
+.animate-fade-in-delay-2 { animation-delay: 0.2s; opacity: 0; }
+.animate-fade-in-delay-3 { animation-delay: 0.3s; opacity: 0; }
+
+/* Button hover states */
+.btn-editor {
+  transition: all 0.15s ease;
+}
+
+.btn-editor:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.btn-editor:active {
+  transform: translateY(0);
+}
+
+/* Color swatch */
+.color-swatch {
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.color-swatch:hover {
+  transform: scale(1.1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+/* Gradient mesh background for preview area */
+.preview-bg {
+  background:
+    radial-gradient(ellipse at 20% 80%, rgba(168, 85, 247, 0.08) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 20%, rgba(59, 130, 246, 0.08) 0%, transparent 50%),
+    #0a0a0b;
+}
+
+/* Section divider */
+.section-divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--editor-border), transparent);
+}
+
+/* Mono font utility */
+.font-mono {
+  font-family: 'JetBrains Mono', monospace;
 }
