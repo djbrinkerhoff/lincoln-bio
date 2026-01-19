@@ -1,654 +1,832 @@
-# feat: Link-in-Bio Tool (Lincoln Bio)
+# feat: Theme Editor Prototype
 
-A simple, themeable link-in-bio tool with an editor and public bio page. Mobile-first, creator-friendly, setup in under 5 minutes.
+A prototype for exploring theming mental models, color relationships, and styling interactions. No auth, no database—just rapid iteration on the core UX questions.
 
-## Simplification Summary
+## Review Summary
 
-**Simplified on:** 2026-01-19
-**Reviewers:** DHH philosophy, Kieran quality standards, Code simplicity
+**Reviewed on:** 2026-01-19
+**Reviewers:** dhh-rails-reviewer, kieran-rails-reviewer, code-simplicity-reviewer
 
-### Changes from Previous Plan
-1. **Removed SaveCoordinator** - Simple debounced save hook instead
-2. **Removed EditorContext/Reducer** - Local `useState` in dashboard
-3. **Removed TextBlocks** - Links only for MVP, defer to v1.1
-4. **Single theme** - Ship with Minimal, add more based on feedback
-5. **Inline URL validation** - Zod only, no separate validator file
-6. **Removed navigation guard** - Trust autosave
-7. **Removed dynamic OG images** - Static meta tags
-8. **Trust platform rate limiting** - No Upstash dependency
-9. **Simplified project structure** - ~15 files instead of ~30
+### Changes From Review
+1. **Reduced files from 12 to 8** - Merged url-state into theme-store, deleted css-vars.ts, inlined ColorRelationshipRow
+2. **Removed Zod** - Simple try/catch with fallback is sufficient for a prototype
+3. **Fixed hydration** - Explicit hydration pattern to prevent theme flash
+4. **Fixed selector optimization** - Individual selectors + useMemo for derived colors
+5. **Removed false OKLCH claim** - colord uses HSL, not OKLCH
+6. **Simplified store actions** - From 7 to 4 actions
+7. **Added missing ThemeEditor** - Concrete implementation included
+8. **Removed Performance Considerations** - Documenting non-problems
 
 ---
 
-## Overview
+## Goal
 
-Build a Linktree-style link-in-bio tool with:
-- **Editor**: Simple list management with live preview
-- **Public Page**: Fast, mobile-optimized bio page at `/{username}`
-- **Theming**: One clean theme (add more later based on feedback)
+Work out the interactions and mental modeling around theming:
+- How do themes work?
+- How does a user edit colors?
+- What are the relationships between colors?
+- If #000 is used in two places, is that one reference or two independent values?
 
-**Not building (MVP)**: Text blocks, multiple themes, analytics, commerce.
+---
+
+## Core Question to Answer
+
+**Linked vs Independent Colors:**
+
+```
+Model A: Linked (Reference-Based)
+┌─────────────────────────────────────────┐
+│ --brand-color: #3b82f6                  │
+│                                         │
+│ --button-bg: var(--brand-color)  ──┐    │
+│ --link-color: var(--brand-color) ──┼─→ Same source
+│ --icon-color: var(--brand-color) ──┘    │
+│                                         │
+│ Change brand-color = all update         │
+└─────────────────────────────────────────┘
+
+Model B: Independent (Separate Values)
+┌─────────────────────────────────────────┐
+│ --button-bg: #3b82f6   (independent)    │
+│ --link-color: #3b82f6  (independent)    │
+│ --icon-color: #3b82f6  (independent)    │
+│                                         │
+│ Same hex, but changing one doesn't      │
+│ affect the others                       │
+└─────────────────────────────────────────┘
+```
+
+**Hypothesis to test:** A hybrid "brand-first with derived colors" model—users set 3 primary colors, system derives the rest, with option to detach for fine control.
 
 ---
 
 ## Tech Stack
 
-| Layer | Technology | Reason |
-|-------|------------|--------|
-| Framework | Next.js 15 (App Router) | SSR/SSG, API routes, image optimization |
-| Styling | Tailwind CSS v4 | Mobile-first, simple theming |
-| Components | shadcn/ui | Accessible, minimal |
-| Database | SQLite + Prisma (dev) / Turso (prod) | Simple, edge-ready |
-| Auth | NextAuth.js + Magic Links | Fast onboarding |
-| Image Storage | Vercel Blob | Zero-config with Next.js |
-| Deployment | Vercel | Native Next.js support |
+| Layer | Choice | Reason |
+|-------|--------|--------|
+| Framework | Next.js 15 | Already set up, fast refresh |
+| Styling | Tailwind CSS v4 | CSS custom properties integration |
+| Color Picker | react-colorful | 2.8KB, accessible |
+| Color Math | colord + plugins | Contrast ratios, mixing, a11y checking |
+| State | Zustand | Simple API |
+| Storage | URL params | Shareable, no backend, survives refresh |
+
+**Not using:** Database, auth, API routes, image upload, Zod, zundo
+
+---
+
+## Project Structure (8 files)
+
+```
+lincoln-bio-proto/
+├── app/
+│   ├── page.tsx           # Split view: editor + preview
+│   ├── layout.tsx
+│   └── globals.css        # CSS custom properties
+├── components/
+│   ├── theme-editor.tsx   # Editor panel (includes relationship rows)
+│   ├── color-input.tsx    # Picker + hex + contrast badge
+│   ├── bio-preview.tsx    # Live bio page preview
+│   └── bio-link.tsx       # Single link button
+└── lib/
+    ├── theme-store.ts     # Zustand store + URL sync
+    └── color-utils.ts     # colord helpers
+```
 
 ---
 
 ## Data Model
 
-```mermaid
-erDiagram
-    User ||--o{ Link : has
+Simple override pattern:
+- Absence in `overrides` = derived automatically
+- Presence in `overrides` = detached, user's custom value
 
-    User {
-        string id PK
-        string username UK
-        string email UK
-        string displayName
-        string bio
-        string profileImage
-        string linkOrder "JSON array of link IDs"
-        datetime createdAt
-        datetime updatedAt
-    }
+```typescript
+// lib/theme-store.ts
 
-    Link {
-        string id PK
-        string userId FK
-        string title
-        string url
-        boolean isActive
-        datetime createdAt
-        datetime updatedAt
-    }
-```
+type ButtonStyle = 'filled' | 'outline' | 'soft';
+type BorderRadius = 'none' | 'sm' | 'md' | 'lg' | 'full';
+type DerivedColorKey = 'card' | 'accentHover';
 
-### Schema (Prisma)
+interface ThemeState {
+  // Source colors (user picks these)
+  background: string;
+  accent: string;
+  text: string;
 
-```prisma
-// prisma/schema.prisma
-datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  // Derived color overrides (absent = auto-calculated, present = detached)
+  overrides: Partial<Record<DerivedColorKey, string>>;
+
+  // Style options
+  buttonStyle: ButtonStyle;
+  borderRadius: BorderRadius;
+
+  // Hydration flag
+  _hydrated: boolean;
 }
 
-generator client {
-  provider        = "prisma-client-js"
-  previewFeatures = ["driverAdapters"]
-}
-
-model User {
-  id            String   @id @default(cuid())
-  username      String   @unique
-  email         String   @unique
-  displayName   String?
-  bio           String?
-  profileImage  String?
-  linkOrder     String   @default("[]") // JSON array of link IDs
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-
-  links         Link[]
-}
-
-model Link {
-  id        String   @id @default(cuid())
-  userId    String
-  title     String
-  url       String
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
+interface ThemeActions {
+  hydrate: () => void;
+  set: <K extends keyof ThemeState>(key: K, value: ThemeState[K]) => void;
+  setOverride: (key: DerivedColorKey, value: string | null) => void; // null = reattach
+  reset: () => void;
 }
 ```
 
-**Note:** No `@@index([username])` - the `@unique` constraint already creates an index.
+### Vocabulary (per Figma conventions)
+- "attached" = references source, auto-derives
+- "detached" = independent value
 
 ---
 
-## Project Structure
+## Color Derivation
 
-```
-lincoln-bio/
-├── app/
-│   ├── (auth)/
-│   │   └── login/page.tsx          # Magic link login
-│   ├── dashboard/
-│   │   └── page.tsx                # Editor (all state here)
-│   ├── [username]/
-│   │   └── page.tsx                # Public bio page (SSG + ISR)
-│   ├── api/
-│   │   ├── auth/[...nextauth]/route.ts
-│   │   ├── profile/route.ts        # User profile CRUD
-│   │   ├── links/route.ts          # Links CRUD
-│   │   └── upload/route.ts         # Image upload
-│   ├── layout.tsx
-│   ├── page.tsx                    # Landing/marketing
-│   └── globals.css
-├── components/
-│   ├── ui/                         # shadcn (button, input, card, avatar)
-│   ├── link-editor.tsx             # Single link edit form
-│   ├── link-list.tsx               # Sortable link list
-│   ├── profile-form.tsx            # Profile editing
-│   ├── bio-page.tsx                # Public page renderer (shared)
-│   └── bio-link.tsx                # Link button component
-├── lib/
-│   ├── db.ts                       # Prisma client
-│   ├── auth.ts                     # NextAuth config
-│   ├── schemas.ts                  # Zod schemas (with URL validation)
-│   └── use-debounced-save.ts       # Simple save hook (~15 lines)
-├── prisma/
-│   └── schema.prisma
-└── package.json
-```
-
-**~15 files total** instead of 30+.
-
----
-
-## Implementation Phases
-
-### Phase 1: Foundation
-
-**Goal**: Project setup with auth and database.
-
-#### Tasks
-
-- [ ] Initialize Next.js 15 project
-  ```bash
-  npx create-next-app@latest lincoln-bio --typescript --tailwind --eslint --app
-  ```
-- [ ] Install shadcn/ui
-  ```bash
-  npx shadcn@latest init
-  npx shadcn@latest add button input label card avatar
-  ```
-- [ ] Set up Prisma with SQLite
-  ```bash
-  npm install prisma @prisma/client
-  npx prisma init --datasource-provider sqlite
-  ```
-- [ ] Create database schema (User, Link)
-- [ ] Set up NextAuth.js with magic link
-  ```bash
-  npm install next-auth @auth/prisma-adapter resend
-  ```
-- [ ] Create login page
-- [ ] Add auth middleware
-
-**Files to create:**
-- `prisma/schema.prisma`
-- `lib/db.ts`
-- `lib/auth.ts`
-- `app/api/auth/[...nextauth]/route.ts`
-- `app/(auth)/login/page.tsx`
-- `middleware.ts`
-
-#### Auth Setup
+colord uses HSL for `darken()`/`lighten()` operations. This is sufficient for a prototype.
 
 ```typescript
-// lib/auth.ts
-import NextAuth from "next-auth"
-import Resend from "next-auth/providers/resend"
-import { PrismaAdapter } from "@auth/prisma-adapter"
-import { prisma } from "@/lib/db"
+// lib/color-utils.ts
+import { colord, extend } from 'colord';
+import a11yPlugin from 'colord/plugins/a11y';
+import mixPlugin from 'colord/plugins/mix';
 
-export const { handlers, auth, signIn, signOut } = NextAuth({
-  adapter: PrismaAdapter(prisma),
-  providers: [
-    Resend({
-      apiKey: process.env.AUTH_RESEND_KEY,
-      from: "Lincoln Bio <auth@lincolnbio.app>",
-    }),
-  ],
-  pages: {
-    signIn: "/login",
-  },
-  callbacks: {
-    session({ session, user }) {
-      session.user.id = user.id
-      session.user.username = user.username
-      return session
-    },
-  },
-})
-```
+extend([a11yPlugin, mixPlugin]);
 
-```typescript
-// middleware.ts
-import { auth } from "@/lib/auth"
-import { NextResponse } from "next/server"
-
-export default auth((req) => {
-  const isLoggedIn = !!req.auth?.user
-  const isProtected = req.nextUrl.pathname.startsWith('/dashboard')
-
-  if (isProtected && !isLoggedIn) {
-    return NextResponse.redirect(new URL('/login', req.nextUrl.origin))
-  }
-})
-
-export const config = { matcher: ['/dashboard/:path*'] }
-```
-
----
-
-### Phase 2: Editor
-
-**Goal**: Functional editor with profile and links.
-
-#### Tasks
-
-- [ ] Build dashboard page with local state
-- [ ] Create profile form (photo, name, bio, username)
-- [ ] Implement image upload to Vercel Blob
-  ```bash
-  npm install @vercel/blob
-  ```
-- [ ] Create link editor component
-- [ ] Implement link reordering (HTML5 drag or up/down buttons)
-- [ ] Add debounced autosave hook
-- [ ] Build live preview (shared bio components)
-- [ ] Add revalidation after saves
-
-**Files to create:**
-- `app/dashboard/page.tsx`
-- `components/profile-form.tsx`
-- `components/link-editor.tsx`
-- `components/link-list.tsx`
-- `components/bio-page.tsx`
-- `components/bio-link.tsx`
-- `lib/use-debounced-save.ts`
-- `lib/schemas.ts`
-- `app/api/profile/route.ts`
-- `app/api/links/route.ts`
-- `app/api/upload/route.ts`
-
-#### Simple Debounced Save
-
-```typescript
-// lib/use-debounced-save.ts
-import { useRef, useCallback, useState } from 'react'
-
-export function useDebouncedSave(
-  saveFn: () => Promise<void>,
-  delay = 800
-) {
-  const timeoutRef = useRef<NodeJS.Timeout>()
-  const [saving, setSaving] = useState(false)
-
-  const save = useCallback(() => {
-    clearTimeout(timeoutRef.current)
-    timeoutRef.current = setTimeout(async () => {
-      setSaving(true)
-      await saveFn()
-      setSaving(false)
-    }, delay)
-  }, [saveFn, delay])
-
-  return { save, saving }
-}
-```
-
-#### Dashboard with Local State
-
-```typescript
-// app/dashboard/page.tsx
-'use client'
-
-import { useState } from 'react'
-import { ProfileForm } from '@/components/profile-form'
-import { LinkList } from '@/components/link-list'
-import { BioPage } from '@/components/bio-page'
-import { useDebouncedSave } from '@/lib/use-debounced-save'
-
-export default function Dashboard({ initialData }) {
-  const [profile, setProfile] = useState(initialData.profile)
-  const [links, setLinks] = useState(initialData.links)
-
-  const { save: saveProfile, saving: savingProfile } = useDebouncedSave(
-    async () => {
-      await fetch('/api/profile', {
-        method: 'PATCH',
-        body: JSON.stringify(profile),
-      })
-    }
-  )
-
-  const { save: saveLinks, saving: savingLinks } = useDebouncedSave(
-    async () => {
-      await fetch('/api/links', {
-        method: 'PUT',
-        body: JSON.stringify({ links, order: links.map(l => l.id) }),
-      })
-    }
-  )
-
-  return (
-    <div className="grid grid-cols-2 gap-8">
-      <div className="space-y-6">
-        <ProfileForm
-          profile={profile}
-          onChange={(p) => { setProfile(p); saveProfile() }}
-          saving={savingProfile}
-        />
-        <LinkList
-          links={links}
-          onChange={(l) => { setLinks(l); saveLinks() }}
-          saving={savingLinks}
-        />
-      </div>
-      <div className="sticky top-4">
-        <BioPage profile={profile} links={links} isPreview />
-      </div>
-    </div>
-  )
-}
-```
-
-#### Zod Schemas with URL Validation
-
-```typescript
-// lib/schemas.ts
-import { z } from 'zod'
-
-export const urlSchema = z.string().url().max(2048).refine(
-  (url) => {
-    try {
-      const parsed = new URL(url)
-      return ['http:', 'https:'].includes(parsed.protocol)
-    } catch {
-      return false
-    }
-  },
-  'Only HTTP/HTTPS URLs allowed'
-)
-
-export const createLinkSchema = z.object({
-  title: z.string().min(1).max(100).trim(),
-  url: urlSchema,
-})
-
-export const updateProfileSchema = z.object({
-  displayName: z.string().max(50).trim().optional(),
-  bio: z.string().max(500).trim().optional(),
-  username: z.string()
-    .min(3).max(30)
-    .regex(/^[a-z0-9_]+$/, 'Lowercase letters, numbers, underscores only')
-    .optional(),
-})
-```
-
-#### Link Reordering (Simple Approach)
-
-Instead of @dnd-kit, use up/down buttons:
-
-```typescript
-// components/link-list.tsx
-function moveLink(links: Link[], index: number, direction: 'up' | 'down') {
-  const newIndex = direction === 'up' ? index - 1 : index + 1
-  if (newIndex < 0 || newIndex >= links.length) return links
-
-  const newLinks = [...links]
-  ;[newLinks[index], newLinks[newIndex]] = [newLinks[newIndex], newLinks[index]]
-  return newLinks
-}
-
-export function LinkList({ links, onChange }) {
-  return (
-    <div className="space-y-2">
-      {links.map((link, i) => (
-        <div key={link.id} className="flex items-center gap-2">
-          <div className="flex flex-col">
-            <button
-              onClick={() => onChange(moveLink(links, i, 'up'))}
-              disabled={i === 0}
-            >
-              ↑
-            </button>
-            <button
-              onClick={() => onChange(moveLink(links, i, 'down'))}
-              disabled={i === links.length - 1}
-            >
-              ↓
-            </button>
-          </div>
-          <LinkEditor link={link} onChange={/* ... */} />
-        </div>
-      ))}
-    </div>
-  )
-}
-```
-
-#### Link Order Cleanup
-
-When deleting a link, clean up the order array:
-
-```typescript
-// app/api/links/route.ts
-export async function DELETE(request: Request) {
-  const session = await auth()
-  const { id } = await request.json()
-
-  // Delete link
-  await db.link.delete({ where: { id, userId: session.user.id } })
-
-  // Clean up linkOrder
-  const user = await db.user.findUnique({
-    where: { id: session.user.id },
-    select: { linkOrder: true, username: true }
-  })
-
-  const order = JSON.parse(user.linkOrder || '[]')
-  const cleanedOrder = order.filter((linkId: string) => linkId !== id)
-
-  await db.user.update({
-    where: { id: session.user.id },
-    data: { linkOrder: JSON.stringify(cleanedOrder) }
-  })
-
-  // Revalidate public page
-  revalidatePath(`/${user.username}`)
-
-  return Response.json({ success: true })
-}
-```
-
----
-
-### Phase 3: Public Bio Page
-
-**Goal**: Fast, SEO-optimized public page.
-
-#### Tasks
-
-- [ ] Create `[username]` route with SSG + on-demand ISR
-- [ ] Build bio page renderer (shared with editor)
-- [ ] Add Open Graph meta tags (static)
-- [ ] Handle 404 for invalid usernames
-- [ ] Optimize for Core Web Vitals
-
-**Files to create/update:**
-- `app/[username]/page.tsx`
-
-#### SSG with On-Demand Revalidation
-
-```typescript
-// app/[username]/page.tsx
-import { notFound } from 'next/navigation'
-import { BioPage } from '@/components/bio-page'
-import { db } from '@/lib/db'
-
-export const revalidate = false // Use on-demand only
-export const dynamicParams = true
-
-export async function generateStaticParams() {
-  const users = await db.user.findMany({
-    select: { username: true },
-    take: 1000,
-  })
-  return users.map(user => ({ username: user.username }))
-}
-
-export async function generateMetadata({ params }) {
-  const { username } = await params
-  const user = await getUser(username)
-
-  if (!user) return { title: 'Not Found' }
+export function deriveColors(
+  background: string,
+  accent: string,
+  text: string
+): Record<DerivedColorKey, string> {
+  const bg = colord(background);
+  const acc = colord(accent);
+  const txt = colord(text);
 
   return {
-    title: `${user.displayName || user.username} | Lincoln Bio`,
-    description: user.bio || `Check out ${user.username}'s links`,
-    openGraph: {
-      title: user.displayName || user.username,
-      description: user.bio,
-      images: user.profileImage ? [user.profileImage] : [],
-    },
-  }
+    // Card: 5% toward text color (subtle contrast from background)
+    card: bg.mix(txt, 0.05).toHex(),
+    // Accent hover: 10% darker (or lighter if already dark)
+    accentHover: acc.isLight()
+      ? acc.darken(0.1).toHex()
+      : acc.lighten(0.1).toHex(),
+  };
 }
 
-export default async function UserPage({ params }) {
-  const { username } = await params
-  const user = await getUser(username)
-
-  if (!user) notFound()
-
-  return <BioPage profile={user} links={user.links} />
+// WCAG contrast checking
+export function getContrastRatio(fg: string, bg: string): number {
+  return colord(fg).contrast(bg);
 }
 
-async function getUser(username: string) {
-  const user = await db.user.findUnique({
-    where: { username },
-    include: { links: { where: { isActive: true } } },
-  })
+export function isReadable(
+  fg: string,
+  bg: string,
+  level: 'AA' | 'AAA' = 'AA'
+): boolean {
+  return colord(fg).isReadable(bg, { level });
+}
 
-  if (!user) return null
+// Auto-select accessible text color for any background
+export function getAccessibleTextColor(bg: string): '#000000' | '#ffffff' {
+  return colord(bg).isLight() ? '#000000' : '#ffffff';
+}
+```
 
-  // Sort links by order
-  const order = JSON.parse(user.linkOrder || '[]')
-  const sortedLinks = order
-    .map((id: string) => user.links.find(l => l.id === id))
-    .filter(Boolean)
+### WCAG Contrast Requirements
 
-  return { ...user, links: sortedLinks }
+| Element Type | Level AA | Level AAA |
+|--------------|----------|-----------|
+| Normal text (<18px) | **4.5:1** | **7:1** |
+| Large text (>=18px bold) | **3:1** | **4.5:1** |
+| UI components | **3:1** | **3:1** |
+
+---
+
+## CSS Custom Properties
+
+```css
+/* app/globals.css */
+
+/* IMPORTANT: Keep defaults in sync with DEFAULT_STATE in theme-store.ts */
+:root {
+  --color-background: #ffffff;
+  --color-accent: #3b82f6;
+  --color-text: #1f2937;
+  --color-card: #f9fafb;
+  --color-accent-hover: #2563eb;
+  --color-accent-text: #ffffff;
+  --button-radius: 0.5rem;
+}
+
+.react-colorful {
+  width: 100%;
+  height: 160px;
+}
+
+.react-colorful__saturation {
+  border-radius: 4px 4px 0 0;
+}
+
+.react-colorful__hue {
+  height: 24px;
+  border-radius: 0 0 4px 4px;
 }
 ```
 
 ---
 
-### Phase 4: Polish & Deploy
+## Zustand Store (with URL sync)
 
-**Goal**: Production-ready with basic error handling.
-
-#### Tasks
-
-- [ ] Add loading states
-- [ ] Add inline save indicator ("Saved" text, not toast)
-- [ ] Validate username (reserved words, format)
-- [ ] Configure Vercel deployment
-- [ ] Add essential security headers
-- [ ] Set up Turso for production
-
-**Files to update:**
-- `next.config.ts` (security headers)
-- `lib/db.ts` (Turso adapter)
-
-#### Essential Security Headers
+Explicit hydration pattern prevents theme flash and hydration mismatches.
 
 ```typescript
-// next.config.ts
-export default {
-  async headers() {
-    return [{
-      source: '/:path*',
-      headers: [
-        { key: 'X-Frame-Options', value: 'DENY' },
-        { key: 'X-Content-Type-Options', value: 'nosniff' },
-        { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains' },
-      ],
-    }]
+// lib/theme-store.ts
+'use client';
+
+import { create } from 'zustand';
+import { useMemo, useEffect, useRef } from 'react';
+import { useRouter } from 'next/navigation';
+import { deriveColors, getAccessibleTextColor } from './color-utils';
+
+const DEFAULT_STATE: ThemeState = {
+  background: '#ffffff',
+  accent: '#3b82f6',
+  text: '#1f2937',
+  overrides: {},
+  buttonStyle: 'filled',
+  borderRadius: 'md',
+  _hydrated: false,
+};
+
+const RADIUS_VALUES: Record<BorderRadius, string> = {
+  none: '0',
+  sm: '0.25rem',
+  md: '0.5rem',
+  lg: '1rem',
+  full: '9999px',
+};
+
+export const useThemeStore = create<ThemeState & ThemeActions>((set, get) => ({
+  ...DEFAULT_STATE,
+
+  hydrate: () => {
+    if (typeof window === 'undefined') return;
+    if (get()._hydrated) return;
+
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const bg = params.get('bg');
+      const accent = params.get('accent');
+      const text = params.get('text');
+
+      const overrides: ThemeState['overrides'] = {};
+      const cardOverride = params.get('o_card');
+      const accentHoverOverride = params.get('o_accentHover');
+      if (cardOverride) overrides.card = `#${cardOverride}`;
+      if (accentHoverOverride) overrides.accentHover = `#${accentHoverOverride}`;
+
+      set({
+        background: bg ? `#${bg}` : DEFAULT_STATE.background,
+        accent: accent ? `#${accent}` : DEFAULT_STATE.accent,
+        text: text ? `#${text}` : DEFAULT_STATE.text,
+        overrides,
+        buttonStyle: (params.get('btn') as ButtonStyle) || DEFAULT_STATE.buttonStyle,
+        borderRadius: (params.get('radius') as BorderRadius) || DEFAULT_STATE.borderRadius,
+        _hydrated: true,
+      });
+    } catch {
+      set({ _hydrated: true }); // Use defaults on parse error
+    }
   },
+
+  set: (key, value) => set({ [key]: value }),
+
+  setOverride: (key, value) => {
+    if (value === null) {
+      // Reattach: remove from overrides
+      set((state) => {
+        const { [key]: _, ...rest } = state.overrides;
+        return { overrides: rest };
+      });
+    } else {
+      // Detach: add to overrides
+      set((state) => ({
+        overrides: { ...state.overrides, [key]: value },
+      }));
+    }
+  },
+
+  reset: () => set({ ...DEFAULT_STATE, _hydrated: true }),
+}));
+
+// Selector with useMemo for derived colors (prevents recomputation)
+export function useDerivedColors() {
+  const background = useThemeStore((s) => s.background);
+  const accent = useThemeStore((s) => s.accent);
+  const text = useThemeStore((s) => s.text);
+
+  return useMemo(
+    () => deriveColors(background, accent, text),
+    [background, accent, text]
+  );
+}
+
+// Hook to apply theme to CSS variables
+export function useLiveTheme() {
+  const background = useThemeStore((s) => s.background);
+  const accent = useThemeStore((s) => s.accent);
+  const text = useThemeStore((s) => s.text);
+  const overrides = useThemeStore((s) => s.overrides);
+  const borderRadius = useThemeStore((s) => s.borderRadius);
+  const hydrate = useThemeStore((s) => s.hydrate);
+
+  const derived = useDerivedColors();
+
+  // Hydrate on mount
+  useEffect(() => {
+    hydrate();
+  }, [hydrate]);
+
+  // Apply CSS variables
+  useEffect(() => {
+    const root = document.documentElement;
+
+    root.style.setProperty('--color-background', background);
+    root.style.setProperty('--color-accent', accent);
+    root.style.setProperty('--color-text', text);
+    root.style.setProperty('--color-card', overrides.card ?? derived.card);
+    root.style.setProperty('--color-accent-hover', overrides.accentHover ?? derived.accentHover);
+    root.style.setProperty('--color-accent-text', getAccessibleTextColor(accent));
+    root.style.setProperty('--button-radius', RADIUS_VALUES[borderRadius]);
+  }, [background, accent, text, overrides, derived, borderRadius]);
+}
+
+// Hook to sync state to URL (debounced)
+export function useUrlSync() {
+  const router = useRouter();
+  const background = useThemeStore((s) => s.background);
+  const accent = useThemeStore((s) => s.accent);
+  const text = useThemeStore((s) => s.text);
+  const overrides = useThemeStore((s) => s.overrides);
+  const buttonStyle = useThemeStore((s) => s.buttonStyle);
+  const borderRadius = useThemeStore((s) => s.borderRadius);
+  const hydrated = useThemeStore((s) => s._hydrated);
+
+  const timeoutRef = useRef<ReturnType<typeof setTimeout>>();
+
+  useEffect(() => {
+    if (!hydrated) return; // Don't sync until hydrated
+
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+
+    timeoutRef.current = setTimeout(() => {
+      const params = new URLSearchParams();
+
+      params.set('bg', background.slice(1));
+      params.set('accent', accent.slice(1));
+      params.set('text', text.slice(1));
+
+      if (overrides.card) params.set('o_card', overrides.card.slice(1));
+      if (overrides.accentHover) params.set('o_accentHover', overrides.accentHover.slice(1));
+
+      params.set('btn', buttonStyle);
+      params.set('radius', borderRadius);
+
+      router.replace(`?${params.toString()}`, { scroll: false });
+    }, 300);
+
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, [background, accent, text, overrides, buttonStyle, borderRadius, hydrated, router]);
 }
 ```
+
+---
+
+## Components
+
+### ColorInput
+
+```typescript
+// components/color-input.tsx
+'use client';
+
+import { HexColorPicker, HexColorInput } from 'react-colorful';
+import { getContrastRatio, isReadable } from '@/lib/color-utils';
+
+interface ColorInputProps {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  contrastAgainst?: string;
+}
+
+export function ColorInput({
+  label,
+  value,
+  onChange,
+  contrastAgainst,
+}: ColorInputProps) {
+  const contrast = contrastAgainst ? getContrastRatio(value, contrastAgainst) : null;
+  const passesAA = contrastAgainst ? isReadable(value, contrastAgainst, 'AA') : null;
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <label className="text-sm font-medium">{label}</label>
+        {contrast !== null && (
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs font-mono">{contrast.toFixed(1)}:1</span>
+            <span className={`text-xs px-1 rounded ${passesAA ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+              {passesAA ? 'AA' : 'Fail'}
+            </span>
+          </div>
+        )}
+      </div>
+      <HexColorPicker color={value} onChange={onChange} />
+      <HexColorInput
+        color={value}
+        onChange={onChange}
+        prefixed
+        className="w-full px-2 py-1 border rounded text-sm font-mono"
+      />
+    </div>
+  );
+}
+```
+
+### ThemeEditor (with inlined relationship rows)
+
+```typescript
+// components/theme-editor.tsx
+'use client';
+
+import { useThemeStore, useDerivedColors, useLiveTheme, useUrlSync } from '@/lib/theme-store';
+import { ColorInput } from './color-input';
+
+export function ThemeEditor() {
+  useLiveTheme();
+  useUrlSync();
+
+  const background = useThemeStore((s) => s.background);
+  const accent = useThemeStore((s) => s.accent);
+  const text = useThemeStore((s) => s.text);
+  const overrides = useThemeStore((s) => s.overrides);
+  const buttonStyle = useThemeStore((s) => s.buttonStyle);
+  const borderRadius = useThemeStore((s) => s.borderRadius);
+  const set = useThemeStore((s) => s.set);
+  const setOverride = useThemeStore((s) => s.setOverride);
+  const reset = useThemeStore((s) => s.reset);
+
+  const derived = useDerivedColors();
+
+  return (
+    <div className="p-6 space-y-6 overflow-y-auto h-full bg-white">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold">Theme Editor</h2>
+        <button
+          onClick={reset}
+          className="text-sm text-gray-500 hover:text-gray-700"
+        >
+          Reset
+        </button>
+      </div>
+
+      {/* Source Colors */}
+      <section className="space-y-4">
+        <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wide">
+          Source Colors
+        </h3>
+        <ColorInput
+          label="Background"
+          value={background}
+          onChange={(v) => set('background', v)}
+        />
+        <ColorInput
+          label="Accent"
+          value={accent}
+          onChange={(v) => set('accent', v)}
+        />
+        <ColorInput
+          label="Text"
+          value={text}
+          onChange={(v) => set('text', v)}
+          contrastAgainst={background}
+        />
+      </section>
+
+      {/* Derived Colors */}
+      <section className="space-y-3">
+        <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wide">
+          Derived Colors
+        </h3>
+
+        {/* Card color relationship */}
+        <div className="flex items-center gap-2 text-sm p-2 bg-gray-50 rounded">
+          <div className="w-5 h-5 rounded border" style={{ backgroundColor: background }} />
+          <span className="text-gray-500">Background</span>
+          <span className="text-gray-400">→</span>
+          <div className="w-5 h-5 rounded border" style={{ backgroundColor: overrides.card ?? derived.card }} />
+          <span>Card</span>
+          {overrides.card ? (
+            <button
+              onClick={() => setOverride('card', null)}
+              className="text-xs text-blue-600 hover:underline ml-auto"
+            >
+              Reattach
+            </button>
+          ) : (
+            <>
+              <span className="text-xs text-gray-400">(5% toward text)</span>
+              <button
+                onClick={() => setOverride('card', derived.card)}
+                className="text-xs text-blue-600 hover:underline ml-auto"
+              >
+                Detach
+              </button>
+            </>
+          )}
+        </div>
+
+        {/* Accent hover relationship */}
+        <div className="flex items-center gap-2 text-sm p-2 bg-gray-50 rounded">
+          <div className="w-5 h-5 rounded border" style={{ backgroundColor: accent }} />
+          <span className="text-gray-500">Accent</span>
+          <span className="text-gray-400">→</span>
+          <div className="w-5 h-5 rounded border" style={{ backgroundColor: overrides.accentHover ?? derived.accentHover }} />
+          <span>Hover</span>
+          {overrides.accentHover ? (
+            <button
+              onClick={() => setOverride('accentHover', null)}
+              className="text-xs text-blue-600 hover:underline ml-auto"
+            >
+              Reattach
+            </button>
+          ) : (
+            <>
+              <span className="text-xs text-gray-400">(10% darker/lighter)</span>
+              <button
+                onClick={() => setOverride('accentHover', derived.accentHover)}
+                className="text-xs text-blue-600 hover:underline ml-auto"
+              >
+                Detach
+              </button>
+            </>
+          )}
+        </div>
+      </section>
+
+      {/* Style Options */}
+      <section className="space-y-3">
+        <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wide">
+          Button Style
+        </h3>
+        <div className="flex gap-2">
+          {(['filled', 'outline', 'soft'] as const).map((style) => (
+            <button
+              key={style}
+              onClick={() => set('buttonStyle', style)}
+              className={`px-3 py-1 text-sm rounded border ${
+                buttonStyle === style
+                  ? 'border-blue-500 bg-blue-50 text-blue-700'
+                  : 'border-gray-200 hover:border-gray-300'
+              }`}
+            >
+              {style}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="space-y-3">
+        <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wide">
+          Border Radius
+        </h3>
+        <div className="flex gap-2">
+          {(['none', 'sm', 'md', 'lg', 'full'] as const).map((radius) => (
+            <button
+              key={radius}
+              onClick={() => set('borderRadius', radius)}
+              className={`px-3 py-1 text-sm rounded border ${
+                borderRadius === radius
+                  ? 'border-blue-500 bg-blue-50 text-blue-700'
+                  : 'border-gray-200 hover:border-gray-300'
+              }`}
+            >
+              {radius}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {/* Share */}
+      <section className="pt-4 border-t">
+        <button
+          onClick={() => navigator.clipboard.writeText(window.location.href)}
+          className="w-full py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded"
+        >
+          Copy Link
+        </button>
+      </section>
+    </div>
+  );
+}
+```
+
+### BioPreview
+
+```typescript
+// components/bio-preview.tsx
+'use client';
+
+import { BioLink } from './bio-link';
+
+const mockProfile = {
+  name: 'Jane Creator',
+  bio: 'Designer & Developer',
+};
+
+const mockLinks = [
+  { id: '1', title: 'My Portfolio', url: '#' },
+  { id: '2', title: 'Twitter', url: '#' },
+  { id: '3', title: 'Newsletter', url: '#' },
+];
+
+export function BioPreview() {
+  return (
+    <div
+      className="min-h-full p-8"
+      style={{ backgroundColor: 'var(--color-background)' }}
+    >
+      <div className="max-w-sm mx-auto space-y-6">
+        <div className="text-center space-y-2">
+          <div
+            className="w-20 h-20 mx-auto rounded-full"
+            style={{ backgroundColor: 'var(--color-card)' }}
+          />
+          <h1
+            className="text-xl font-semibold"
+            style={{ color: 'var(--color-text)' }}
+          >
+            {mockProfile.name}
+          </h1>
+          <p
+            className="text-sm opacity-70"
+            style={{ color: 'var(--color-text)' }}
+          >
+            {mockProfile.bio}
+          </p>
+        </div>
+
+        <div className="space-y-3">
+          {mockLinks.map((link) => (
+            <BioLink key={link.id} title={link.title} url={link.url} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+### BioLink
+
+```typescript
+// components/bio-link.tsx
+'use client';
+
+import { useThemeStore } from '@/lib/theme-store';
+
+const BUTTON_STYLES = {
+  filled: {
+    backgroundColor: 'var(--color-accent)',
+    color: 'var(--color-accent-text)',
+    border: 'none',
+  },
+  outline: {
+    backgroundColor: 'transparent',
+    color: 'var(--color-accent)',
+    border: '2px solid var(--color-accent)',
+  },
+  soft: {
+    backgroundColor: 'var(--color-card)',
+    color: 'var(--color-text)',
+    border: 'none',
+  },
+} as const;
+
+interface BioLinkProps {
+  title: string;
+  url: string;
+}
+
+export function BioLink({ title, url }: BioLinkProps) {
+  const buttonStyle = useThemeStore((s) => s.buttonStyle);
+
+  return (
+    <a
+      href={url}
+      className="block w-full py-3 px-4 text-center font-medium transition-transform hover:scale-[1.02]"
+      style={{
+        ...BUTTON_STYLES[buttonStyle],
+        borderRadius: 'var(--button-radius)',
+      }}
+    >
+      {title}
+    </a>
+  );
+}
+```
+
+### Page Layout
+
+```typescript
+// app/page.tsx
+import { ThemeEditor } from '@/components/theme-editor';
+import { BioPreview } from '@/components/bio-preview';
+
+export default function Home() {
+  return (
+    <div className="flex h-screen">
+      <aside className="w-80 border-r flex-shrink-0">
+        <ThemeEditor />
+      </aside>
+      <main className="flex-1">
+        <BioPreview />
+      </main>
+    </div>
+  );
+}
+```
+
+---
+
+## Implementation Tasks
+
+### Phase 1: Build It
+
+- [ ] Install dependencies: `npm install zustand react-colorful colord`
+- [ ] Set up `globals.css` with CSS custom properties
+- [ ] Create `lib/color-utils.ts`
+- [ ] Create `lib/theme-store.ts` with hydration + URL sync
+- [ ] Build `components/color-input.tsx`
+- [ ] Build `components/theme-editor.tsx`
+- [ ] Build `components/bio-preview.tsx` and `bio-link.tsx`
+- [ ] Wire up `app/page.tsx` split layout
+
+### Phase 2: Polish & Learn
+
+- [ ] Add "Copy Link" feedback (toast or button text change)
+- [ ] Test: Do users understand "detach/reattach"?
+- [ ] Test: Do they prefer colors auto-updating or independent?
+- [ ] Document findings
 
 ---
 
 ## Acceptance Criteria
 
-### Setup Flow
-- [ ] User can sign up with email (magic link) in under 2 minutes
-- [ ] User can claim unique username
-- [ ] User can upload profile photo
-- [ ] User can add display name and bio
+### Color Editing
+- [ ] User can pick colors using visual picker or hex input
+- [ ] Changes apply instantly
+- [ ] Contrast ratio displayed with AA pass/fail
 
-### Editor
-- [ ] User can add/edit/delete links
-- [ ] User can reorder links
-- [ ] User can toggle link visibility
-- [ ] Changes autosave with "Saved" indicator
-- [ ] Live preview updates in real-time
+### Color Relationships
+- [ ] Derived colors update when source changes
+- [ ] User can detach a derived color
+- [ ] User can reattach to restore derivation
 
-### Public Page
-- [ ] Page loads at `/{username}`
-- [ ] Page displays links in correct order
-- [ ] Links open in new tab
-- [ ] Page is mobile-responsive
-- [ ] Page has Open Graph meta tags
-- [ ] Invalid username shows 404
-- [ ] Changes reflect after save (on-demand revalidation)
+### Live Preview
+- [ ] Preview updates via CSS variables
+- [ ] No flash on page load from shared URL
 
-### Performance
-- [ ] Public page LCP < 1.5s
-- [ ] Public page bundle < 50KB
-- [ ] Save operations < 500ms
+### Sharing
+- [ ] Theme state encoded in URL
+- [ ] "Copy Link" works
 
 ---
 
-## Key Decisions
+## Key Questions to Answer
 
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| Auth method | Magic links | Fastest onboarding |
-| Image storage | Vercel Blob | Zero-config |
-| State management | Local useState | Simple, sufficient |
-| Link reordering | Up/down buttons | No dependencies |
-| Themes | 1 (Minimal) | Ship fast, add based on feedback |
-| TextBlocks | Deferred to v1.1 | Links-only MVP |
-| Save mechanism | Simple debounce | No queue needed for single user |
-| Rate limiting | Vercel platform | No extra dependencies |
+1. **Attached by default?** Should derived colors auto-update or be independent by default?
+2. **Visibility of relationships:** How prominently show that "Card" derives from "Background"?
+3. **Detach friction:** One click or require confirmation?
+4. **User vocabulary:** Do users understand "attached/detached" or prefer "auto/custom"?
 
 ---
 
-## Deferred to v1.1
+## Not Building
 
-- Text blocks (headings, dividers)
-- Additional themes (Brutalist, Editorial)
-- Theme customization (colors, button styles)
-- Custom domains
-- Analytics
+- Authentication
+- Database
+- Image upload
+- Multiple pages
+- Undo/redo
+- More than 2 derived colors
+- Presets (defer to Phase 2 if needed)
 
 ---
 
 ## References
 
-- [Next.js App Router](https://nextjs.org/docs/app)
-- [Prisma with SQLite](https://www.prisma.io/docs/concepts/database-connectors/sqlite)
-- [Auth.js / NextAuth.js](https://authjs.dev/)
-- [Vercel Blob](https://vercel.com/docs/storage/vercel-blob)
-- [Turso + Prisma](https://docs.turso.tech/sdk/ts/orm/prisma)
+- [Zustand](https://zustand.docs.pmnd.rs/)
+- [react-colorful](https://github.com/omgovich/react-colorful)
+- [colord](https://github.com/omgovich/colord)
+- [WCAG Contrast](https://www.w3.org/WAI/WCAG21/Understanding/contrast-minimum.html)
