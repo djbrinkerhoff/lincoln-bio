@@ -70,30 +70,31 @@ function ensureContrast(textColor: string, bgColor: string, minRatio = 4.5): str
   return text.toHex();
 }
 
-export function generatePalettes(accent: string): Palette[] {
-  const key = colord(accent);
+export function generatePalettes(sourceColor: string): Palette[] {
+  const key = colord(sourceColor);
 
   const lightBg = key.lighten(0.45).toHex();
   const softBg = key.desaturate(0.3).lighten(0.4).toHex();
 
+  // All palettes use sourceColor as accent - only bg/text vary
   return [
     {
       name: 'Light',
       background: lightBg,
-      accent: accent,
+      accent: sourceColor,
       text: ensureContrast(key.darken(0.4).toHex(), lightBg),
     },
     {
       name: 'Bold',
       background: '#ffffff',
-      accent: accent,
+      accent: sourceColor,
       text: ensureContrast(key.rotate(180).darken(0.3).toHex(), '#ffffff'),
     },
     {
       name: 'Soft',
       background: softBg,
-      accent: key.rotate(30).toHex(),
-      text: ensureContrast(key.rotate(-30).darken(0.35).toHex(), softBg),
+      accent: sourceColor,
+      text: ensureContrast(key.desaturate(0.2).darken(0.35).toHex(), softBg),
     },
   ];
 }

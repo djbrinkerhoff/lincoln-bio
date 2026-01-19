@@ -151,6 +151,8 @@ export function ThemeEditor() {
   useLiveTheme();
   useUrlSync();
   const [copied, setCopied] = useState(false);
+  const [paletteSource, setPaletteSource] = useState<string | null>(null);
+  const [sourcePickerOpen, setSourcePickerOpen] = useState(false);
 
   const background = useThemeStore((s) => s.background);
   const accent = useThemeStore((s) => s.accent);
@@ -163,8 +165,11 @@ export function ThemeEditor() {
   const setOverride = useThemeStore((s) => s.setOverride);
   const reset = useThemeStore((s) => s.reset);
 
+  // Initialize palette source to accent on first render
+  const effectiveSource = paletteSource ?? accent;
+
   const derived = useDerivedColors();
-  const palettes = useMemo(() => generatePalettes(accent), [accent]);
+  const palettes = useMemo(() => generatePalettes(effectiveSource), [effectiveSource]);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(window.location.href);
@@ -200,6 +205,68 @@ export function ThemeEditor() {
               Quick Palettes
             </h2>
           </div>
+
+          {/* Source color picker */}
+          <div className="bg-zinc-900/50 rounded-xl border border-zinc-800/50 overflow-hidden">
+            <div className="flex items-center justify-between p-3">
+              <button
+                onClick={() => setSourcePickerOpen(!sourcePickerOpen)}
+                className="flex items-center gap-2 cursor-pointer"
+              >
+                <span className="text-[10px] text-zinc-500">Based on</span>
+                <div
+                  className="w-4 h-4 rounded ring-1 ring-white/10"
+                  style={{ backgroundColor: effectiveSource }}
+                />
+                <span className="text-[10px] font-mono text-zinc-400">{effectiveSource}</span>
+                <svg
+                  className={`w-3 h-3 text-zinc-500 transition-transform ${sourcePickerOpen ? 'rotate-180' : ''}`}
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setSourcePickerOpen(!sourcePickerOpen)}
+                  className="text-[10px] font-medium text-zinc-500 hover:text-zinc-300 px-2 py-1 rounded-md hover:bg-zinc-800 transition-colors"
+                >
+                  {sourcePickerOpen ? 'Close' : 'Edit'}
+                </button>
+                {effectiveSource !== accent && (
+                  <button
+                    onClick={() => {
+                      setPaletteSource(accent);
+                      setSourcePickerOpen(false);
+                    }}
+                    className="text-[10px] font-medium text-violet-400 hover:text-violet-300 px-2 py-1 rounded-md hover:bg-violet-500/10 transition-colors"
+                  >
+                    Use Primary
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {sourcePickerOpen && (
+              <div className="px-3 pb-3 space-y-3 animate-fade-in border-t border-zinc-800/50 pt-3">
+                <HexColorPicker
+                  color={effectiveSource}
+                  onChange={(color) => setPaletteSource(color)}
+                />
+                <div className="relative">
+                  <HexColorInput
+                    color={effectiveSource}
+                    onChange={(color) => setPaletteSource(color)}
+                    prefixed
+                    className="w-full px-3 py-2.5 bg-zinc-900 border border-zinc-800 rounded-xl text-sm font-mono text-zinc-100 focus:outline-none focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600 uppercase tracking-wider"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="space-y-2">
             {palettes.map((palette) => (
               <button
@@ -238,7 +305,7 @@ export function ThemeEditor() {
           <div className="flex items-center gap-2">
             <div className="w-1 h-4 bg-gradient-to-b from-violet-500 to-fuchsia-500 rounded-full" />
             <h2 className="text-xs font-semibold text-zinc-400 uppercase tracking-widest">
-              Brand Colors
+              Current Colors
             </h2>
           </div>
           <div className="space-y-2">
