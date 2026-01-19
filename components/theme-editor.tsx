@@ -1,10 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { HexColorPicker, HexColorInput } from 'react-colorful';
 import { useThemeStore, useDerivedColors, useLiveTheme, useUrlSync } from '@/lib/theme-store';
 import { ColorInput } from './color-input';
-import type { DerivedColorKey } from '@/lib/color-utils';
+import { generatePalettes, type DerivedColorKey } from '@/lib/color-utils';
 
 interface DerivedColorRowProps {
   label: string;
@@ -155,7 +155,8 @@ export function ThemeEditor() {
   const background = useThemeStore((s) => s.background);
   const accent = useThemeStore((s) => s.accent);
   const text = useThemeStore((s) => s.text);
-  const overrides = useThemeStore((s) => s.overrides);
+  const cardOverride = useThemeStore((s) => s.overrides.card);
+  const accentHoverOverride = useThemeStore((s) => s.overrides.accentHover);
   const buttonStyle = useThemeStore((s) => s.buttonStyle);
   const borderRadius = useThemeStore((s) => s.borderRadius);
   const set = useThemeStore((s) => s.set);
@@ -163,6 +164,7 @@ export function ThemeEditor() {
   const reset = useThemeStore((s) => s.reset);
 
   const derived = useDerivedColors();
+  const palettes = useMemo(() => generatePalettes(accent), [accent]);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(window.location.href);
@@ -190,6 +192,47 @@ export function ThemeEditor() {
 
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto editor-scroll px-6 py-6 space-y-8">
+        {/* Quick Palettes */}
+        <section className="space-y-3">
+          <div className="flex items-center gap-2">
+            <div className="w-1 h-4 bg-gradient-to-b from-pink-500 to-rose-500 rounded-full" />
+            <h2 className="text-xs font-semibold text-zinc-400 uppercase tracking-widest">
+              Quick Palettes
+            </h2>
+          </div>
+          <div className="space-y-2">
+            {palettes.map((palette) => (
+              <button
+                key={palette.name}
+                onClick={() => {
+                  set('background', palette.background);
+                  set('accent', palette.accent);
+                  set('text', palette.text);
+                }}
+                className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-zinc-800/50 transition-colors border border-transparent hover:border-zinc-700/50"
+              >
+                <div className="flex gap-1.5">
+                  <div
+                    className="w-6 h-6 rounded-lg ring-1 ring-white/10"
+                    style={{ backgroundColor: palette.background }}
+                  />
+                  <div
+                    className="w-6 h-6 rounded-lg ring-1 ring-white/10"
+                    style={{ backgroundColor: palette.accent }}
+                  />
+                  <div
+                    className="w-6 h-6 rounded-lg ring-1 ring-white/10"
+                    style={{ backgroundColor: palette.text }}
+                  />
+                </div>
+                <span className="text-sm text-zinc-300">{palette.name}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <div className="section-divider" />
+
         {/* Brand Colors */}
         <section className="space-y-4">
           <div className="flex items-center gap-2">
@@ -234,7 +277,7 @@ export function ThemeEditor() {
               colorKey="card"
               sourceColor={background}
               derivedColor={derived.card}
-              overrideColor={overrides.card}
+              overrideColor={cardOverride}
               onOverride={(value) => setOverride('card', value)}
             />
             <DerivedColorRow
@@ -242,7 +285,7 @@ export function ThemeEditor() {
               colorKey="accentHover"
               sourceColor={accent}
               derivedColor={derived.accentHover}
-              overrideColor={overrides.accentHover}
+              overrideColor={accentHoverOverride}
               onOverride={(value) => setOverride('accentHover', value)}
             />
           </div>

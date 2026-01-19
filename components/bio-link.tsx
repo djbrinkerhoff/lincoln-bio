@@ -33,7 +33,7 @@ export function BioLink({ title, url, icon }: BioLinkProps) {
   return (
     <a
       href={url}
-      className="group relative block w-full py-3.5 px-4 text-center font-medium transition-all duration-200 hover:scale-[1.02] hover:shadow-lg active:scale-[0.98]"
+      className={`bio-link-${buttonStyle} group relative block w-full py-3.5 px-4 text-center font-medium transition-all duration-200 hover:scale-[1.02] hover:shadow-lg active:scale-[0.98]`}
       style={{
         ...BUTTON_STYLES[buttonStyle],
         borderRadius: 'var(--button-radius)',

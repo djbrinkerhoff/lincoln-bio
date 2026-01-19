@@ -162,6 +162,19 @@ body {
   background: linear-gradient(90deg, transparent, var(--editor-border), transparent);
 }
 
+/* Bio link hover states */
+.bio-link-filled:hover {
+  background-color: var(--color-accent-hover) !important;
+}
+
+.bio-link-outline:hover {
+  border-color: var(--color-accent-hover) !important;
+}
+
+.bio-link-soft:hover {
+  filter: brightness(0.95);
+}
+
 /* Mono font utility */
 .font-mono {
   font-family: 'JetBrains Mono', monospace;
