@@ -1,0 +1,30 @@
+@import "tailwindcss";
+
+/* IMPORTANT: Keep defaults in sync with DEFAULT_STATE in theme-store.ts */
+:root {
+  --color-background: #ffffff;
+  --color-accent: #3b82f6;
+  --color-text: #1f2937;
+  --color-card: #f9fafb;
+  --color-accent-hover: #2563eb;
+  --color-accent-text: #ffffff;
+  --button-radius: 0.5rem;
+}
+
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+.react-colorful {
+  width: 100%;
+  height: 160px;
+}
+
+.react-colorful__saturation {
+  border-radius: 4px 4px 0 0;
+}
+
+.react-colorful__hue {
+  height: 24px;
+  border-radius: 0 0 4px 4px;
+}

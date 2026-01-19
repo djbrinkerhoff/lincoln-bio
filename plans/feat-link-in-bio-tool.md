@@ -763,14 +763,14 @@ export default function Home() {
 
 ### Phase 1: Build It
 
-- [ ] Install dependencies: `npm install zustand react-colorful colord`
-- [ ] Set up `globals.css` with CSS custom properties
-- [ ] Create `lib/color-utils.ts`
-- [ ] Create `lib/theme-store.ts` with hydration + URL sync
-- [ ] Build `components/color-input.tsx`
-- [ ] Build `components/theme-editor.tsx`
-- [ ] Build `components/bio-preview.tsx` and `bio-link.tsx`
-- [ ] Wire up `app/page.tsx` split layout
+- [x] Install dependencies: `npm install zustand react-colorful colord`
+- [x] Set up `globals.css` with CSS custom properties
+- [x] Create `lib/color-utils.ts`
+- [x] Create `lib/theme-store.ts` with hydration + URL sync
+- [x] Build `components/color-input.tsx`
+- [x] Build `components/theme-editor.tsx`
+- [x] Build `components/bio-preview.tsx` and `bio-link.tsx`
+- [x] Wire up `app/page.tsx` split layout
 
 ### Phase 2: Polish & Learn
 
