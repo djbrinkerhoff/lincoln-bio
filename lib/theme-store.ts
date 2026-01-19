@@ -8,6 +8,23 @@ import { deriveColors, getAccessibleTextColor, type DerivedColorKey } from './co
 export type ButtonStyle = 'filled' | 'outline' | 'soft';
 export type BorderRadius = 'none' | 'sm' | 'md' | 'lg' | 'full';
 
+// Validation constants and functions
+const VALID_BUTTON_STYLES: readonly ButtonStyle[] = ['filled', 'outline', 'soft'];
+const VALID_BORDER_RADII: readonly BorderRadius[] = ['none', 'sm', 'md', 'lg', 'full'];
+
+function isValidHexColor(value: string | null): boolean {
+  if (!value) return false;
+  return /^[0-9a-fA-F]{3}$|^[0-9a-fA-F]{6}$/.test(value);
+}
+
+function isValidButtonStyle(value: string | null): value is ButtonStyle {
+  return VALID_BUTTON_STYLES.includes(value as ButtonStyle);
+}
+
+function isValidBorderRadius(value: string | null): value is BorderRadius {
+  return VALID_BORDER_RADII.includes(value as BorderRadius);
+}
+
 export interface ThemeState {
   background: string;
   accent: string;
@@ -59,16 +76,19 @@ export const useThemeStore = create<ThemeState & ThemeActions>((set, get) => ({
       const overrides: ThemeState['overrides'] = {};
       const cardOverride = params.get('o_card');
       const accentHoverOverride = params.get('o_accentHover');
-      if (cardOverride) overrides.card = `#${cardOverride}`;
-      if (accentHoverOverride) overrides.accentHover = `#${accentHoverOverride}`;
+      if (isValidHexColor(cardOverride)) overrides.card = `#${cardOverride}`;
+      if (isValidHexColor(accentHoverOverride)) overrides.accentHover = `#${accentHoverOverride}`;
+
+      const btnParam = params.get('btn');
+      const radiusParam = params.get('radius');
 
       set({
-        background: bg ? `#${bg}` : DEFAULT_STATE.background,
-        accent: accent ? `#${accent}` : DEFAULT_STATE.accent,
-        text: text ? `#${text}` : DEFAULT_STATE.text,
+        background: isValidHexColor(bg) ? `#${bg}` : DEFAULT_STATE.background,
+        accent: isValidHexColor(accent) ? `#${accent}` : DEFAULT_STATE.accent,
+        text: isValidHexColor(text) ? `#${text}` : DEFAULT_STATE.text,
         overrides,
-        buttonStyle: (params.get('btn') as ButtonStyle) || DEFAULT_STATE.buttonStyle,
-        borderRadius: (params.get('radius') as BorderRadius) || DEFAULT_STATE.borderRadius,
+        buttonStyle: isValidButtonStyle(btnParam) ? btnParam : DEFAULT_STATE.buttonStyle,
+        borderRadius: isValidBorderRadius(radiusParam) ? radiusParam : DEFAULT_STATE.borderRadius,
         _hydrated: true,
       });
     } catch {

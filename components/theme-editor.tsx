@@ -1,23 +1,21 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback, memo } from 'react';
 import { HexColorPicker, HexColorInput } from 'react-colorful';
 import { useThemeStore, useDerivedColors, useLiveTheme, useUrlSync } from '@/lib/theme-store';
 import { ColorInput } from './color-input';
-import { generatePalettes, type DerivedColorKey } from '@/lib/color-utils';
+import { generatePalettes } from '@/lib/color-utils';
 
 interface DerivedColorRowProps {
   label: string;
-  colorKey: DerivedColorKey;
   sourceColor: string;
   derivedColor: string;
   overrideColor: string | undefined;
   onOverride: (value: string | null) => void;
 }
 
-function DerivedColorRow({
+const DerivedColorRow = memo(function DerivedColorRow({
   label,
-  colorKey,
   sourceColor,
   derivedColor,
   overrideColor,
@@ -145,7 +143,7 @@ function DerivedColorRow({
       )}
     </div>
   );
-}
+});
 
 export function ThemeEditor() {
   useLiveTheme();
@@ -170,6 +168,16 @@ export function ThemeEditor() {
 
   const derived = useDerivedColors();
   const palettes = useMemo(() => generatePalettes(effectiveSource), [effectiveSource]);
+
+  // Memoized callbacks for derived color overrides
+  const handleCardOverride = useCallback(
+    (value: string | null) => setOverride('card', value),
+    [setOverride]
+  );
+  const handleAccentHoverOverride = useCallback(
+    (value: string | null) => setOverride('accentHover', value),
+    [setOverride]
+  );
 
   const handleCopy = () => {
     navigator.clipboard.writeText(window.location.href);
@@ -341,19 +349,17 @@ export function ThemeEditor() {
           <div className="space-y-3">
             <DerivedColorRow
               label="Card"
-              colorKey="card"
               sourceColor={background}
               derivedColor={derived.card}
               overrideColor={cardOverride}
-              onOverride={(value) => setOverride('card', value)}
+              onOverride={handleCardOverride}
             />
             <DerivedColorRow
               label="Hover"
-              colorKey="accentHover"
               sourceColor={accent}
               derivedColor={derived.accentHover}
               overrideColor={accentHoverOverride}
-              onOverride={(value) => setOverride('accentHover', value)}
+              onOverride={handleAccentHoverOverride}
             />
           </div>
         </section>

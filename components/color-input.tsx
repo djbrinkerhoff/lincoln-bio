@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo, memo } from 'react';
 import { HexColorPicker, HexColorInput } from 'react-colorful';
 import { getContrastRatio, isReadable } from '@/lib/color-utils';
 
@@ -11,15 +11,19 @@ interface ColorInputProps {
   contrastAgainst?: string;
 }
 
-export function ColorInput({
+export const ColorInput = memo(function ColorInput({
   label,
   value,
   onChange,
   contrastAgainst,
 }: ColorInputProps) {
   const [isExpanded, setIsExpanded] = useState(false);
-  const contrast = contrastAgainst ? getContrastRatio(value, contrastAgainst) : null;
-  const passesAA = contrastAgainst ? isReadable(value, contrastAgainst, 'AA') : null;
+
+  // Memoize contrast calculations to avoid recalculating on every render
+  const { contrast, passesAA } = useMemo(() => ({
+    contrast: contrastAgainst ? getContrastRatio(value, contrastAgainst) : null,
+    passesAA: contrastAgainst ? isReadable(value, contrastAgainst, 'AA') : null,
+  }), [value, contrastAgainst]);
 
   return (
     <div className="space-y-3">
@@ -80,4 +84,4 @@ export function ColorInput({
       )}
     </div>
   );
-}
+});
