@@ -191,8 +191,7 @@ export function ThemeEditor() {
       <div className="px-6 py-5 border-b border-zinc-800/50">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-lg font-semibold text-zinc-100 tracking-tight">Theme Studio</h1>
-            <p className="text-xs text-zinc-500 mt-0.5">Craft your brand identity</p>
+            <h1 className="text-lg font-semibold text-zinc-100 tracking-tight">Kiln</h1>
           </div>
           <button
             onClick={reset}
