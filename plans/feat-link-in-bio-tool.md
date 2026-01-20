@@ -169,27 +169,27 @@ lincoln-bio/
 
 #### Tasks
 
-- [ ] Initialize Next.js 15 project
+- [x] Initialize Next.js 15 project
   ```bash
   npx create-next-app@latest lincoln-bio --typescript --tailwind --eslint --app
   ```
-- [ ] Install shadcn/ui
+- [x] Install shadcn/ui
   ```bash
   npx shadcn@latest init
   npx shadcn@latest add button input label card avatar
   ```
-- [ ] Set up Prisma with SQLite
+- [x] Set up Prisma with SQLite
   ```bash
   npm install prisma @prisma/client
   npx prisma init --datasource-provider sqlite
   ```
-- [ ] Create database schema (User, Link)
-- [ ] Set up NextAuth.js with magic link
+- [x] Create database schema (User, Link)
+- [x] Set up NextAuth.js with magic link
   ```bash
   npm install next-auth @auth/prisma-adapter resend
   ```
-- [ ] Create login page
-- [ ] Add auth middleware
+- [x] Create login page
+- [x] Add auth middleware
 
 **Files to create:**
 - `prisma/schema.prisma`
@@ -254,17 +254,17 @@ export const config = { matcher: ['/dashboard/:path*'] }
 
 #### Tasks
 
-- [ ] Build dashboard page with local state
-- [ ] Create profile form (photo, name, bio, username)
-- [ ] Implement image upload to Vercel Blob
+- [x] Build dashboard page with local state
+- [x] Create profile form (photo, name, bio, username)
+- [x] Implement image upload to Vercel Blob
   ```bash
   npm install @vercel/blob
   ```
-- [ ] Create link editor component
-- [ ] Implement link reordering (HTML5 drag or up/down buttons)
-- [ ] Add debounced autosave hook
-- [ ] Build live preview (shared bio components)
-- [ ] Add revalidation after saves
+- [x] Create link editor component
+- [x] Implement link reordering (HTML5 drag or up/down buttons)
+- [x] Add debounced autosave hook
+- [x] Build live preview (shared bio components)
+- [x] Add revalidation after saves
 
 **Files to create:**
 - `app/dashboard/page.tsx`
@@ -478,11 +478,11 @@ export async function DELETE(request: Request) {
 
 #### Tasks
 
-- [ ] Create `[username]` route with SSG + on-demand ISR
-- [ ] Build bio page renderer (shared with editor)
-- [ ] Add Open Graph meta tags (static)
-- [ ] Handle 404 for invalid usernames
-- [ ] Optimize for Core Web Vitals
+- [x] Create `[username]` route with SSG + on-demand ISR
+- [x] Build bio page renderer (shared with editor)
+- [x] Add Open Graph meta tags (static)
+- [x] Handle 404 for invalid usernames
+- [x] Optimize for Core Web Vitals
 
 **Files to create/update:**
 - `app/[username]/page.tsx`
@@ -558,11 +558,11 @@ async function getUser(username: string) {
 
 #### Tasks
 
-- [ ] Add loading states
-- [ ] Add inline save indicator ("Saved" text, not toast)
-- [ ] Validate username (reserved words, format)
+- [x] Add loading states
+- [x] Add inline save indicator ("Saved" text, not toast)
+- [x] Validate username (reserved words, format)
 - [ ] Configure Vercel deployment
-- [ ] Add essential security headers
+- [x] Add essential security headers
 - [ ] Set up Turso for production
 
 **Files to update:**
